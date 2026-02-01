@@ -1,0 +1,7 @@
+services:
+  minio:
+    image: quay.io/minio/minio
+    ports:
+      - "9000:9000" # API
+      - "9001:9001" # Console: using minioadmin:minioadmin
+    command: server /tmp/minio --console-address ":9001"

@@ -1,0 +1,97 @@
+[workspace]
+channels = ["conda-forge"]
+description = "DuckDB vs Polars benchmark on S3 (TPC-H lineitem) + plots"
+name = "duckdb-polars-s3-bench"
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+version = "0.1.0"
+
+[dependencies]
+python = ">=3.11,<3.13"
+
+# Core benchmark deps
+# NOTE: DuckDB extensions from conda need LD_PRELOAD/DYLD_INSERT_LIBRARIES workaround
+# (see scripts/activate.sh) because python-duckdb has DuckDB statically linked
+# with hidden symbols, but extensions need libduckdb symbols.
+duckdb-cli = ">=1.4.4"
+duckdb-extension-httpfs = ">=1.4.4"
+duckdb-extension-tpch = ">=1.4.4"
+matplotlib = ">=3.8"
+numpy = ">=1.24"
+pandas = ">=2.0"
+polars = ">=1.0.0"
+psutil = ">=5.9"
+python-duckdb = ">=1.4.4"
+
+# S3 support
+boto3 = ">=1.28"
+fsspec = ">=2024.3.1"
+s3fs = ">=2024.3.1"
+
+[feature.dev.dependencies]
+python-dotenv = ">=1.0"
+ruff = ">=0.5"
+
+[environments]
+default = { features = ["dev"], solve-group = "default" }
+
+# =============================================================================
+# Activation and Configuration
+# =============================================================================
+# All S3 credentials, bucket paths, and benchmark settings are in bench.env
+# (see bench.env.example for template). The activate.sh script sources bench.env.
+#
+# To set up: cp bench.env.example bench.env && edit bench.env
+# bench.env is gitignored and won't be committed.
+[activation]
+scripts = ["scripts/activate.sh"]
+
+[tasks]
+# --- Setup / Data generation ---
+# Note: scripts/activate.sh sets DYLD_INSERT_LIBRARIES/LD_PRELOAD to fix DuckDB extension loading
+generate = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py generate --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION'"
+
+generate_normal = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py generate --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --normal-only'"
+
+generate_stress = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py generate --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --stress-only'"
+
+# --- Bench runs (read-only count) ---
+run_count = { cmd = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py run --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --tool all --test all --mode count --iterations $BENCH_ITERATIONS --out-dir $BENCH_OUT_DIR'", depends-on = [
+  "generate",
+] }
+
+# --- Bench runs that write back to S3 ---
+run_filter_write = { cmd = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py run --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --tool all --test all --mode filter_write --out-s3-prefix $BENCH_OUT_S3_PREFIX --cleanup-s3-output --iterations $BENCH_ITERATIONS_WRITE --out-dir $BENCH_OUT_DIR_FILTER_WRITE'", depends-on = [
+  "generate",
+] }
+
+run_copy_project = { cmd = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py run --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --tool all --test all --mode copy_project --out-s3-prefix $BENCH_OUT_S3_PREFIX --cleanup-s3-output --iterations $BENCH_ITERATIONS_COPY --out-dir $BENCH_OUT_DIR_COPY_PROJECT'", depends-on = [
+  "generate",
+] }
+
+# --- Plotting ---
+plot_count = "python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR --mode count"
+
+plot_filter_write = "python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR_FILTER_WRITE --mode filter_write"
+
+plot_copy_project = "python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR_COPY_PROJECT --mode copy_project"
+
+# Create all benchmark plots at once (waits for all run tasks to complete)
+plot_all = { cmd = "python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR --mode count && python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR_FILTER_WRITE --mode filter_write && python s3_tpch_duckdb_polars_bench.py plot --out-dir $BENCH_OUT_DIR_COPY_PROJECT --mode copy_project && python s3_tpch_duckdb_polars_bench.py plot-string --out-dir $BENCH_OUT_DIR_STRING", depends-on = [
+  "run_copy_project",
+  "run_count",
+  "run_filter_write",
+  "run_string",
+] }
+
+# --- String table benchmarks (join/group-by) ---
+generate_string = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py generate-string --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION'"
+
+run_string = { cmd = "bash -c 'source scripts/activate.sh && python s3_tpch_duckdb_polars_bench.py run-string --bucket $BENCH_S3_BUCKET --prefix $BENCH_S3_PREFIX --region $BENCH_AWS_REGION --tool all --mode all --out-s3-prefix $BENCH_OUT_S3_PREFIX --cleanup-s3-output --iterations $BENCH_ITERATIONS --out-dir $BENCH_OUT_DIR_STRING'", depends-on = [
+  "generate_string",
+] }
+
+plot_string = "python s3_tpch_duckdb_polars_bench.py plot-string --out-dir $BENCH_OUT_DIR_STRING"
+
+# Optional: end-to-end convenience (expensive!)
+# Order: generate -> run_* -> plot_all (dependencies ensure correct sequencing)
+all = { depends-on = ["plot_all"] }

@@ -1,0 +1,15 @@
+# Benchmark configuration (contains credentials, bucket paths)
+# Copy bench.env.example to bench.env and customize for your environment.
+bench.env
+
+# Benchmark results (generated)
+results_s3/
+results_s3_filter_write/
+results_s3_copy_project/
+results_string/
+
+# pixi environment
+.pixi/
+
+# jetbrains
+.idea
