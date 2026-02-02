@@ -31,8 +31,14 @@ s3fs = ">=2024.3.1"
 python-dotenv = ">=1.0"
 ruff = ">=0.5"
 
+[feature.docker.dependencies]
+# Provides a `docker-compose` executable inside the Pixi environment.
+# Note: This does NOT install the Docker Engine/daemon; you still need Docker installed/running.
+docker-compose = "*"
+
 [environments]
 default = { features = ["dev"], solve-group = "default" }
+docker = { features = ["dev", "docker"], solve-group = "default" }
 
 # =============================================================================
 # Activation and Configuration

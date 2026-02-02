@@ -221,6 +221,35 @@ def s3_client(region: str | None) -> Any:
     return sess.client("s3")
 
 
+def ensure_s3_bucket_exists(bucket: str, region: str | None) -> None:
+    """Ensure bucket exists for local S3 endpoints (e.g. MinIO).
+
+    On real AWS S3, buckets are often pre-provisioned and creating them implicitly is
+    surprising, so we only auto-create when AWS_ENDPOINT_URL is set.
+
+    This is important for the DuckDB CLI + httpfs path: when the target bucket does
+    not exist, some DuckDB builds can terminate with SIGPIPE during COPY to S3.
+    """
+    endpoint_url = aws_endpoint_url()
+    if not endpoint_url:
+        return
+
+    c = s3_client(region)
+    try:
+        c.head_bucket(Bucket=bucket)
+        return
+    except Exception:
+        pass
+
+    # MinIO typically accepts simple create_bucket without location constraints.
+    print(f"[s3] creating bucket {bucket!r} at {endpoint_url}", flush=True)
+    try:
+        c.create_bucket(Bucket=bucket)
+    except Exception:
+        # Racy create or different semantics: re-check.
+        c.head_bucket(Bucket=bucket)
+
+
 def s3_list_objects(
     bucket: str, prefix: str, region: str | None
 ) -> list[dict[str, Any]]:
@@ -2378,6 +2407,7 @@ def main() -> None:
     if args.cmd == "generate":
         if args.normal_only and args.stress_only:
             die("Choose at most one of --normal-only or --stress-only")
+        ensure_s3_bucket_exists(args.bucket, region)
         normal_sf = _resolve_sequence(args.normal_sf, get_normal_sf)
         stress_small_base = get_stress_small_base_sf()
         stress_small_repeats = _resolve_sequence(
@@ -2454,6 +2484,7 @@ def main() -> None:
 
     elif args.cmd == "generate-string":
         scales = args.scales if args.scales else get_string_scales()
+        ensure_s3_bucket_exists(args.bucket, region)
         generate_string_tables(
             bucket=args.bucket,
             prefix=args.prefix,
